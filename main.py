@@ -38,7 +38,7 @@ DATA_DIR            = "data"          # pasta onde ficam os .db de cada empresa
 SUPERADMIN_USER     = "superadmin"
 SUPERADMIN_PASS     = "Super@2024!"   # TROQUE ESTA SENHA em produção
 APP_VENDOR          = "INFO TECH ARAÇATUBA"
-WHATSAPP_2FA_NUMBER = "18996622714"   # número que recebe o código 2FA
+WHATSAPP_2FA_NUMBER = "5518996622714"   # número que recebe o código 2FA
 _2fa_pending        = {}              # {superadmin_id: {"code": "123456", "expires": timestamp}}
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -364,21 +364,15 @@ async def login(
             "SELECT * FROM superadmins WHERE username=?", (username,)
         ).fetchone()
         if sa and pwd_ctx.verify(password, sa['senha']):
-            # Gera código 2FA de 6 dígitos e armazena por 5 minutos
-            code    = str(random.randint(100000, 999999))
-            expires = time.time() + 300  # 5 minutos
-            _2fa_pending[sa['id']] = {"code": code, "expires": expires}
-            # Envia código via CallMeBot WhatsApp
-            import urllib.request, urllib.parse
-            msg = urllib.parse.quote(f"FinControl Pro - Seu codigo de acesso e: {code} (valido por 5 minutos)")
-            url = f"https://api.callmebot.com/whatsapp.php?phone={WHATSAPP_2FA_NUMBER}&text={msg}&apikey=2120023"
-            try:
-                urllib.request.urlopen(url, timeout=8)
-            except Exception:
-                pass  # não bloqueia o fluxo se o envio falhar
+            # 2FA DESATIVADO TEMPORARIAMENTE — reativar quando pronto para produção
+            token = create_token({"sub": str(sa['id']), "super": True})
             return {
-                "2fa_required": True,
-                "sa_id": sa['id'],
+                "access_token": token,
+                "token_type": "bearer",
+                "usuario": {
+                    "id": sa['id'], "username": sa['username'],
+                    "nome": sa['nome'], "role": "superadmin", "slug": None,
+                },
             }
 
     # 2. Login em empresa específica via header
@@ -424,32 +418,33 @@ async def login(
 
 
 # ─────────────────────────────────────────────────────────────────
-# 2FA — VERIFICAÇÃO DO SUPERADMIN
+# 2FA — VERIFICAÇÃO DO SUPERADMIN (DESATIVADO TEMPORARIAMENTE)
+# Para reativar: descomentar todo o bloco abaixo e restaurar o fluxo no /auth/login
 # ─────────────────────────────────────────────────────────────────
-@app.post("/auth/verify-2fa")
-async def verify_2fa(sa_id: int = Form(...), code: str = Form(...)):
-    pending = _2fa_pending.get(sa_id)
-    if not pending:
-        raise HTTPException(status_code=401, detail="Nenhum código pendente. Faça login novamente.")
-    if time.time() > pending["expires"]:
-        del _2fa_pending[sa_id]
-        raise HTTPException(status_code=401, detail="Código expirado. Faça login novamente.")
-    if pending["code"] != code.strip():
-        raise HTTPException(status_code=401, detail="Código incorreto.")
-    del _2fa_pending[sa_id]
-    with get_master_db() as conn:
-        sa = conn.execute("SELECT * FROM superadmins WHERE id=?", (sa_id,)).fetchone()
-        if not sa:
-            raise HTTPException(status_code=401)
-    token = create_token({"sub": str(sa['id']), "super": True})
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "usuario": {
-            "id": sa['id'], "username": sa['username'],
-            "nome": sa['nome'], "role": "superadmin", "slug": None,
-        },
-    }
+# @app.post("/auth/verify-2fa")
+# async def verify_2fa(sa_id: int = Form(...), code: str = Form(...)):
+#     pending = _2fa_pending.get(sa_id)
+#     if not pending:
+#         raise HTTPException(status_code=401, detail="Nenhum código pendente. Faça login novamente.")
+#     if time.time() > pending["expires"]:
+#         del _2fa_pending[sa_id]
+#         raise HTTPException(status_code=401, detail="Código expirado. Faça login novamente.")
+#     if pending["code"] != code.strip():
+#         raise HTTPException(status_code=401, detail="Código incorreto.")
+#     del _2fa_pending[sa_id]
+#     with get_master_db() as conn:
+#         sa = conn.execute("SELECT * FROM superadmins WHERE id=?", (sa_id,)).fetchone()
+#         if not sa:
+#             raise HTTPException(status_code=401)
+#     token = create_token({"sub": str(sa['id']), "super": True})
+#     return {
+#         "access_token": token,
+#         "token_type": "bearer",
+#         "usuario": {
+#             "id": sa['id'], "username": sa['username'],
+#             "nome": sa['nome'], "role": "superadmin", "slug": None,
+#         },
+#     }
 
 
 # ─────────────────────────────────────────────────────────────────
