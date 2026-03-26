@@ -1,0 +1,1602 @@
+// ═══════════════════════════════════════════════════════════
+// FinControl Pro — Frontend Multi-Tenant
+// Copyright © 2024 INFO TECH ARAÇATUBA. Todos os direitos reservados.
+// ═══════════════════════════════════════════════════════════
+
+const API = window.location.origin.includes('localhost') ? 'http://localhost:8080' : '';
+
+let currentUser   = null;
+let authToken     = null;
+let chartFluxo    = null;
+let chartCat      = null;
+let chartSaldo    = null;
+let chartDespCat  = null;
+let chartRecCat   = null;
+let movFilterType = 'todos';
+
+// ═══════════════════════════════════════════════════════════
+// HTTP HELPER
+// ═══════════════════════════════════════════════════════════
+async function api(method, path, body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  if (res.status === 401) { doLogout(); return null; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Erro desconhecido' }));
+    throw new Error(err.detail || 'Erro na requisição');
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+async function apiForm(path, formData, extraHeaders = {}) {
+  const headers = { ...extraHeaders };
+  const res = await fetch(API + path, { method: 'POST', body: formData, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Erro' }));
+    throw new Error(err.detail || 'Erro');
+  }
+  return res.json();
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════════════
+async function doLogin() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl    = document.getElementById('auth-error');
+  errEl.style.display = 'none';
+  if (!username || !password) {
+    errEl.textContent = 'Preencha todos os campos.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try {
+    const form = new FormData();
+    form.append('username', username);
+    form.append('password', password);
+    const data = await apiForm('/auth/login', form);
+    if (data['2fa_required']) {
+      // Superadmin: mostra tela de código 2FA
+      show2FAScreen(data.sa_id);
+      return;
+    }
+    authToken   = data.access_token;
+    currentUser = data.usuario;
+    localStorage.setItem('fincontrol_token', authToken);
+    localStorage.setItem('fincontrol_user',  JSON.stringify(currentUser));
+    initApp();
+  } catch (e) {
+    errEl.textContent = e.message || 'Usuário ou senha inválidos.';
+    errEl.style.display = 'block';
+  }
+}
+
+function show2FAScreen(saId) {
+  const card = document.querySelector('.auth-card');
+  card.innerHTML = `
+    <div class="auth-logo">
+      <h1>FinControl Pro</h1>
+      <p>Verificação em 2 etapas</p>
+      <p class="auth-copyright">© 2024 INFO TECH ARAÇATUBA</p>
+    </div>
+    <div style="text-align:center;margin-bottom:20px;">
+      <span class="auth-badge">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><circle cx="5" cy="5" r="4" fill="currentColor"/></svg>
+        Código enviado via WhatsApp
+      </span>
+    </div>
+    <p style="font-size:13px;color:var(--text2);text-align:center;margin-bottom:20px;">
+      Um código de 6 dígitos foi enviado ao WhatsApp cadastrado.<br>Digite-o abaixo para continuar.
+    </p>
+    <div class="auth-error" id="auth-error-2fa"></div>
+    <div class="form-group">
+      <label>Código de verificação</label>
+      <input type="text" id="code-2fa" placeholder="000000" maxlength="6"
+        style="letter-spacing:8px;font-size:22px;text-align:center;"
+        autocomplete="one-time-code"/>
+    </div>
+    <button class="btn-primary" onclick="doVerify2FA(${saId})">Verificar e Entrar</button>
+    <p class="auth-hint" style="margin-top:12px;">
+      <a href="#" onclick="location.reload()" style="color:var(--accent);text-decoration:none;">← Voltar ao login</a>
+    </p>`;
+  document.getElementById('code-2fa').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doVerify2FA(saId);
+  });
+  document.getElementById('code-2fa').focus();
+}
+
+async function doVerify2FA(saId) {
+  const code  = document.getElementById('code-2fa').value.trim();
+  const errEl = document.getElementById('auth-error-2fa');
+  errEl.style.display = 'none';
+  if (!code || code.length < 6) {
+    errEl.textContent = 'Digite o código de 6 dígitos.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try {
+    const form = new FormData();
+    form.append('sa_id', saId);
+    form.append('code', code);
+    const data  = await apiForm('/auth/verify-2fa', form);
+    authToken   = data.access_token;
+    currentUser = data.usuario;
+    localStorage.setItem('fincontrol_token', authToken);
+    localStorage.setItem('fincontrol_user',  JSON.stringify(currentUser));
+    initApp();
+  } catch (e) {
+    errEl.textContent = e.message || 'Código inválido.';
+    errEl.style.display = 'block';
+  }
+}
+
+function doLogout() {
+  authToken   = null;
+  currentUser = null;
+  localStorage.removeItem('fincontrol_token');
+  localStorage.removeItem('fincontrol_user');
+  document.getElementById('app').style.display         = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('login-user').value = '';
+  document.getElementById('login-pass').value = '';
+}
+
+function initApp() {
+  document.getElementById('user-name-display').textContent = currentUser.nome;
+  document.getElementById('user-role-display').textContent =
+    currentUser.role === 'superadmin' ? 'Super Admin' :
+    currentUser.role === 'admin'      ? 'Administrador' :
+    currentUser.role === 'gerente'    ? 'Gerente' : 'Operador';
+  document.getElementById('user-avatar').textContent =
+    currentUser.nome.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display         = 'flex';
+  document.getElementById('today-date').textContent    =
+    new Date().toLocaleDateString('pt-BR', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+  // Exibe ou oculta itens de nav conforme role
+  const superNavItem = document.getElementById('nav-superadmin');
+  if (superNavItem) {
+    superNavItem.style.display = currentUser.role === 'superadmin' ? 'flex' : 'none';
+  }
+  const superNavSection = document.getElementById('nav-section-superadmin');
+  if (superNavSection) {
+    superNavSection.style.display = currentUser.role === 'superadmin' ? 'block' : 'none';
+  }
+
+  // Oculta botão de backup para superadmin (ele não tem dados de empresa)
+  const backupWrap = document.getElementById('backup-btn-wrap');
+  if (backupWrap) {
+    backupWrap.style.display = currentUser.role === 'superadmin' ? 'none' : 'block';
+  }
+
+  if (currentUser.role === 'superadmin') {
+    navigate('superadmin');
+  } else {
+    navigate('dashboard');
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const savedToken = localStorage.getItem('fincontrol_token');
+  const savedUser  = localStorage.getItem('fincontrol_user');
+  if (savedToken && savedUser) {
+    authToken   = savedToken;
+    currentUser = JSON.parse(savedUser);
+    initApp();
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const passEl = document.getElementById('login-pass');
+  if (passEl) passEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+  const overlayEl = document.getElementById('modal-overlay');
+  if (overlayEl) overlayEl.addEventListener('click', e => {
+    if (e.target === overlayEl) closeModal();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.getAttribute('onclick')?.includes(`'${page}'`)) n.classList.add('active');
+  });
+  if (window.innerWidth <= 640) closeSidebar();
+
+  const loaders = {
+    dashboard:    refreshDashboard,
+    receitas:     loadReceitas,
+    despesas:     loadDespesas,
+    fluxo:        loadFluxo,
+    produtos:     loadProdutos,
+    movimentos:   loadMovimentos,
+    clientes:     loadClientes,
+    fornecedores: loadFornecedores,
+    relatorios:   loadRelatorios,
+    superadmin:   loadSuperAdmin,
+  };
+  if (loaders[page]) loaders[page]();
+}
+
+// ═══════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════
+function fmt(v) {
+  return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  return String(d).substring(0, 10).split('-').reverse().join('/');
+}
+
+function fmtDateTime(d) {
+  if (!d) return '—';
+  const parts = String(d).replace('T', ' ').substring(0, 16).split(' ');
+  return `${parts[0].split('-').reverse().join('/')} ${parts[1] || ''}`;
+}
+
+function toast(msg, type = 'success') {
+  const t  = document.getElementById('toast');
+  const el = document.createElement('div');
+  el.className = 'toast-item ' + type;
+  const icon = type === 'success'
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="9 11 12 14 22 4"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  el.innerHTML = icon + msg;
+  t.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MOBILE — controle da sidebar
+// ═══════════════════════════════════════════════════════════
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar.classList.contains('open')) {
+    closeSidebar();
+  } else {
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function closeSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!sidebar || !overlay) return;
+  sidebar.classList.remove('open');
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+// ═══════════════════════════════════════════════════════════
+// SUPERADMIN — PAINEL DE EMPRESAS
+// ═══════════════════════════════════════════════════════════
+async function loadSuperAdmin() {
+  const rows = await api('GET', '/superadmin/empresas') || [];
+  const container = document.getElementById('sa-empresas');
+  if (!container) return;
+
+  if (!rows.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+        </svg>
+        <p>Nenhuma empresa cadastrada ainda.<br>Clique em "Nova Empresa" para começar.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Empresa</th><th>Slug / URL</th><th>Usuários</th>
+            <th>Clientes</th><th>Transações</th><th>Status</th>
+            <th>Criado em</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td><div style="font-weight:600;">${r.nome}</div></td>
+              <td><code style="font-size:11px;color:var(--accent);">${r.slug}</code></td>
+              <td>${r.total_usuarios}</td>
+              <td>${r.total_clientes}</td>
+              <td>${r.total_transacoes}</td>
+              <td><span class="badge ${r.ativo ? 'badge-green' : 'badge-red'}">${r.ativo ? 'Ativo' : 'Inativo'}</span></td>
+              <td style="font-size:12px;color:var(--text2);">${fmtDate(r.criado_em)}</td>
+              <td style="display:flex;gap:6px;">
+                <button class="btn btn-ghost btn-sm" onclick="openSAUsuarios('${r.slug}','${r.nome}')">Usuários</button>
+                <button class="btn btn-ghost btn-sm" onclick="openSAEditEmpresa('${r.slug}','${r.nome}',${r.ativo})">Editar</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteSAEmpresa('${r.slug}','${r.nome}')">✕</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function openSANovaEmpresa() {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  content.innerHTML = `
+    <h3>🏢 Nova Empresa / Cliente</h3>
+    <div class="form-group">
+      <label>Nome da Empresa*</label>
+      <input id="sa-nome" placeholder="Ex: Empresa XYZ Ltda"/>
+    </div>
+    <div class="form-group">
+      <label>Slug (identificador único)*</label>
+      <input id="sa-slug" placeholder="ex: empresa-xyz"
+        oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_-]/g,'')"/>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;">
+        Apenas letras minúsculas, números, hífen e underscore. Não pode ser alterado depois.
+      </div>
+    </div>
+    <hr class="divider"/>
+    <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:12px;">👤 Admin da Empresa</div>
+    <div class="form-group">
+      <label>Nome do Admin*</label>
+      <input id="sa-admin-nome" placeholder="Ex: João Silva"/>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Usuário*</label>
+        <input id="sa-admin-user" placeholder="admin" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label>Senha*</label>
+        <input id="sa-admin-pass" type="password" placeholder="Senha segura" autocomplete="off"/>
+      </div>
+    </div>
+    <div class="alert alert-warning" style="margin-top:8px;">
+      ⚠ Anote a senha — ela não pode ser recuperada depois.
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-blue" onclick="saveSAEmpresa()">Criar Empresa</button>
+    </div>`;
+  overlay.classList.add('open');
+}
+
+async function saveSAEmpresa() {
+  const nome      = document.getElementById('sa-nome').value.trim();
+  const slug      = document.getElementById('sa-slug').value.trim();
+  const adminNome = document.getElementById('sa-admin-nome').value.trim();
+  const adminUser = document.getElementById('sa-admin-user').value.trim();
+  const adminPass = document.getElementById('sa-admin-pass').value;
+  if (!nome || !slug || !adminNome || !adminUser || !adminPass) {
+    toast('Preencha todos os campos obrigatórios.', 'error');
+    return;
+  }
+  try {
+    await api('POST', '/superadmin/empresas', {
+      nome,
+      slug,
+      admin_username: adminUser,
+      admin_senha: adminPass,
+      admin_nome: adminNome,
+    });
+    closeModal();
+    loadSuperAdmin();
+    toast(`Empresa "${nome}" criada com sucesso!`);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function openSAEditEmpresa(slug, nome, ativo) {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  content.innerHTML = `
+    <h3>✏️ Editar Empresa</h3>
+    <div class="form-group">
+      <label>Nome da Empresa*</label>
+      <input id="sa-edit-nome" value="${nome}"/>
+    </div>
+    <div class="form-group">
+      <label>Slug</label>
+      <input value="${slug}" disabled style="opacity:0.5;cursor:not-allowed;"/>
+    </div>
+    <div class="form-group">
+      <label>Status</label>
+      <select id="sa-edit-ativo">
+        <option value="1" ${ativo ? 'selected' : ''}>Ativo</option>
+        <option value="0" ${!ativo ? 'selected' : ''}>Inativo (bloqueia login)</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-blue" onclick="updateSAEmpresa('${slug}')">Salvar</button>
+    </div>`;
+  overlay.classList.add('open');
+}
+
+async function updateSAEmpresa(slug) {
+  const nome  = document.getElementById('sa-edit-nome').value.trim();
+  const ativo = document.getElementById('sa-edit-ativo').value === '1';
+  if (!nome) { toast('Nome é obrigatório.', 'error'); return; }
+  try {
+    await api('PUT', `/superadmin/empresas/${slug}`, { nome, ativo });
+    closeModal();
+    loadSuperAdmin();
+    toast('Empresa atualizada!');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteSAEmpresa(slug, nome) {
+  if (!confirm(`⚠ ATENÇÃO: Excluir a empresa "${nome}" irá apagar TODOS os dados dela permanentemente.\n\nEsta ação não pode ser desfeita. Confirmar?`)) return;
+  if (!confirm(`Confirmação final: excluir "${nome}" e todos os dados?`)) return;
+  try {
+    await api('DELETE', `/superadmin/empresas/${slug}`);
+    loadSuperAdmin();
+    toast(`Empresa "${nome}" excluída.`);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function openSAUsuarios(slug, nomeEmpresa) {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  content.innerHTML = `
+    <h3>👥 Usuários — ${nomeEmpresa}</h3>
+    <div id="sa-users-list" style="min-height:100px;">
+      <div class="empty-state"><p>Carregando...</p></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+      <button class="btn btn-blue" onclick="openSANovoUsuario('${slug}')">+ Novo Usuário</button>
+    </div>`;
+  overlay.classList.add('open');
+  await renderSAUsuarios(slug);
+}
+
+async function renderSAUsuarios(slug) {
+  const rows = await api('GET', `/superadmin/empresas/${slug}/usuarios`) || [];
+  const el   = document.getElementById('sa-users-list');
+  if (!el) return;
+  const roleLabel = r => r === 'admin' ? 'Administrador' : r === 'gerente' ? 'Gerente' : 'Operador';
+  const roleBadge = r => r === 'admin' ? 'badge-blue' : r === 'gerente' ? 'badge-purple' : 'badge-amber';
+  el.innerHTML = rows.length
+    ? `<table style="width:100%;">
+        <thead>
+          <tr><th>Nome</th><th>Usuário</th><th>Role</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+          ${rows.map(u => `
+            <tr>
+              <td style="font-weight:500;">${u.nome}</td>
+              <td style="font-family:monospace;font-size:12px;">${u.username}</td>
+              <td><span class="badge ${roleBadge(u.role)}">${roleLabel(u.role)}</span></td>
+              <td><span class="badge ${u.ativo ? 'badge-green' : 'badge-red'}">${u.ativo ? 'Ativo' : 'Inativo'}</span></td>
+              <td>${u.ativo
+                ? `<button class="btn btn-danger btn-sm" onclick="removeSAUsuario('${slug}',${u.id},this)">Desativar</button>`
+                : ''}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`
+    : '<div class="empty-state"><p>Nenhum usuário</p></div>';
+}
+
+async function removeSAUsuario(slug, uid, btn) {
+  if (!confirm('Desativar este usuário?')) return;
+  try {
+    await api('DELETE', `/superadmin/empresas/${slug}/usuarios/${uid}`);
+    await renderSAUsuarios(slug);
+    toast('Usuário desativado.');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function openSANovoUsuario(slug) {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  content.innerHTML = `
+    <h3>➕ Novo Usuário</h3>
+    <div class="form-group">
+      <label>Nome*</label>
+      <input id="sa-u-nome" placeholder="Nome completo"/>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Usuário*</label>
+        <input id="sa-u-user" placeholder="login" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label>Senha*</label>
+        <input id="sa-u-pass" type="password" placeholder="Senha" autocomplete="off"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Role</label>
+      <select id="sa-u-role">
+        <option value="admin">Administrador</option>
+        <option value="gerente">Gerente</option>
+        <option value="operador" selected>Operador</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="openSAUsuarios('${slug}','')">Voltar</button>
+      <button class="btn btn-blue" onclick="saveSAUsuario('${slug}')">Criar Usuário</button>
+    </div>`;
+  overlay.classList.add('open');
+}
+
+async function saveSAUsuario(slug) {
+  const nome = document.getElementById('sa-u-nome').value.trim();
+  const user = document.getElementById('sa-u-user').value.trim();
+  const pass = document.getElementById('sa-u-pass').value;
+  const role = document.getElementById('sa-u-role').value;
+  if (!nome || !user || !pass) { toast('Preencha todos os campos.', 'error'); return; }
+  try {
+    await api('POST', `/superadmin/empresas/${slug}/usuarios`, {
+      username: user, senha: pass, nome, role
+    });
+    await openSAUsuarios(slug, '');
+    toast('Usuário criado!');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Atualiza o banner de boas-vindas com o nome do cliente/empresa cadastrado.
+ * O nome é recuperado do registro da empresa via /superadmin/empresas
+ * ou diretamente do nome do usuário logado (campo `nome` no token).
+ */
+function updateDashboardWelcome() {
+  const titleEl    = document.getElementById('dash-welcome-title');
+  const subtitleEl = document.getElementById('dash-welcome-subtitle');
+  if (!titleEl || !subtitleEl || !currentUser) return;
+
+  // Nome do operador logado
+  const userName = currentUser.nome || 'Usuário';
+  // Slug da empresa (identificador de cadastro)
+  const empresaSlug = currentUser.slug
+    ? currentUser.slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+    : '';
+
+  if (empresaSlug) {
+    titleEl.textContent    = `Bem-vindo, ${userName}`;
+    subtitleEl.textContent = `Empresa: ${empresaSlug} · Gerencie suas finanças e estoque`;
+  } else {
+    titleEl.textContent    = `Bem-vindo, ${userName}`;
+    subtitleEl.textContent = 'Gerencie suas finanças e estoque com facilidade';
+  }
+}
+
+async function refreshDashboard() {
+  try {
+    // Atualiza banner com nome do cliente cadastrado
+    updateDashboardWelcome();
+
+    const d = await api('GET', '/dashboard');
+    if (!d) return;
+
+    if (d.nome_empresa) {
+      const titleEl = document.getElementById('dash-title');
+      if (titleEl) titleEl.textContent = d.nome_empresa;
+    }
+
+    document.getElementById('dash-stats').innerHTML = [
+      {
+        label:  'Saldo Total',
+        value:  fmt(d.saldo),
+        change: d.saldo >= 0 ? '▲ Positivo' : '▼ Negativo',
+        pos:    d.saldo >= 0,
+        icon:   '💰'
+      },
+      {
+        label:  'Total Receitas',
+        value:  fmt(d.total_receitas),
+        change: 'Confirmadas',
+        pos:    true,
+        icon:   '📈'
+      },
+      {
+        label:  'Total Despesas',
+        value:  fmt(d.total_despesas),
+        change: 'Pagas',
+        pos:    false,
+        icon:   '📉'
+      },
+      {
+        label:  'Produtos Ativos',
+        value:  d.total_produtos,
+        change: d.estoque_baixo > 0
+          ? `⚠ ${d.estoque_baixo} abaixo mínimo`
+          : '✓ Estoque ok',
+        pos:    d.estoque_baixo === 0,
+        icon:   '📦'
+      },
+    ].map(s => `
+      <div class="stat-card">
+        <div style="display:flex;justify-content:space-between;align-items:start;">
+          <div class="stat-label">${s.label}</div>
+          <div style="font-size:20px;">${s.icon}</div>
+        </div>
+        <div class="stat-value" style="font-size:18px;">${s.value}</div>
+        <div class="stat-change ${s.pos ? 'pos' : 'neg'}">${s.change}</div>
+      </div>`).join('');
+
+    document.getElementById('dash-transactions').innerHTML =
+      d.ultimas_transacoes.length
+        ? d.ultimas_transacoes.map(t => `
+            <div class="summary-row">
+              <div>
+                <div style="font-size:13px;font-weight:500;">${t.descricao}</div>
+                <div style="font-size:11px;color:var(--text3);">${fmtDate(t.data)} · ${t.tipo}</div>
+              </div>
+              <div class="money ${t.tipo === 'receita' ? 'money-green' : 'money-red'}">
+                ${t.tipo === 'receita' ? '+' : '-'}${fmt(t.valor)}
+              </div>
+            </div>`).join('')
+        : '<div class="empty-state"><p>Nenhuma transação</p></div>';
+
+    document.getElementById('dash-low-count').textContent = d.estoque_baixo;
+    document.getElementById('dash-lowstock').innerHTML =
+      d.estoque_critico.length
+        ? d.estoque_critico.map(p => `
+            <div class="summary-row">
+              <div>
+                <div style="font-size:13px;font-weight:500;">${p.nome}</div>
+                <div style="font-size:11px;color:var(--text3);">${p.codigo}</div>
+              </div>
+              <div>
+                <span class="stock-low">${p.estoque_atual}</span>
+                <span style="color:var(--text3);font-size:11px;">/ mín ${p.estoque_minimo}</span>
+              </div>
+            </div>`).join('')
+        : '<div class="empty-state" style="padding:24px;"><p>Nenhum produto crítico ✓</p></div>';
+
+    buildChartFluxo();
+    buildChartCat();
+  } catch (e) {
+    console.error(e);
+    toast('Erro ao carregar dashboard', 'error');
+  }
+}
+
+async function buildChartFluxo() {
+  const rows = await api('GET', '/dashboard/fluxo-mensal');
+  if (!rows) return;
+  const meses  = {};
+  const labels = [];
+  rows.forEach(r => {
+    if (!meses[r.mes]) { meses[r.mes] = { rec: 0, desp: 0 }; labels.push(r.mes); }
+    if (r.tipo === 'receita') meses[r.mes].rec  += Number(r.total);
+    else                      meses[r.mes].desp += Number(r.total);
+  });
+  const rec  = labels.map(m => meses[m].rec);
+  const desp = labels.map(m => meses[m].desp);
+  const fmtLabel = m => {
+    const [y, mo] = m.split('-');
+    return new Date(y, mo - 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+  };
+  const ctx = document.getElementById('chart-fluxo').getContext('2d');
+  if (chartFluxo) chartFluxo.destroy();
+  chartFluxo = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels.map(fmtLabel),
+      datasets: [
+        { label: 'Receitas', data: rec,  backgroundColor: 'rgba(16,185,129,0.6)', borderRadius: 4 },
+        { label: 'Despesas', data: desp, backgroundColor: 'rgba(239,68,68,0.5)',  borderRadius: 4 },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8b90a0', font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: '#555a6e' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: {
+          ticks: { color: '#555a6e', callback: v => 'R$' + v.toLocaleString('pt-BR') },
+          grid:  { color: 'rgba(255,255,255,0.04)' }
+        }
+      }
+    }
+  });
+}
+
+async function buildChartCat() {
+  const cats = await api('GET', '/dashboard/categorias-despesas');
+  if (!cats || !cats.length) return;
+  const ctx = document.getElementById('chart-cat').getContext('2d');
+  if (chartCat) chartCat.destroy();
+  chartCat = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: cats.map(c => c.categoria || 'Outras'),
+      datasets: [{
+        data: cats.map(c => c.total),
+        backgroundColor: [
+          '#3b82f6','#8b5cf6','#ef4444','#f59e0b',
+          '#10b981','#06b6d4','#ec4899','#84cc16'
+        ],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#8b90a0', font: { size: 11 }, boxWidth: 12 }
+        }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// RECEITAS
+// ═══════════════════════════════════════════════════════════
+async function loadReceitas() {
+  const s   = document.getElementById('search-receitas')?.value || '';
+  const cat = document.getElementById('filter-receitas-cat')?.value || '';
+  let qs = '?tipo=receita';
+  if (s)   qs += `&q=${encodeURIComponent(s)}`;
+  if (cat) qs += `&status=${encodeURIComponent(cat)}`;
+  const rows = await api('GET', `/transacoes${qs}`) || [];
+  const statusBadge = s => s === 'pago' ? 'badge-green' : s === 'pendente' ? 'badge-amber' : 'badge-red';
+  document.getElementById('tb-receitas').innerHTML = rows.length
+    ? rows.map(r => `
+        <tr>
+          <td>${fmtDate(r.data)}</td>
+          <td>${r.descricao}</td>
+          <td><span class="badge badge-blue">${r.categoria_nome || '—'}</span></td>
+          <td>${r.cliente_nome || '—'}</td>
+          <td class="money money-green">+${fmt(r.valor)}</td>
+          <td><span class="badge ${statusBadge(r.status)}">${r.status}</span></td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteTransacao(${r.id},'receita')">✕</button></td>
+        </tr>`).join('')
+    : `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px;">Nenhuma receita encontrada</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// DESPESAS
+// ═══════════════════════════════════════════════════════════
+async function loadDespesas() {
+  const s   = document.getElementById('search-despesas')?.value || '';
+  const cat = document.getElementById('filter-despesas-cat')?.value || '';
+  let qs = '?tipo=despesa';
+  if (s)   qs += `&q=${encodeURIComponent(s)}`;
+  if (cat) qs += `&status=${encodeURIComponent(cat)}`;
+  const rows = await api('GET', `/transacoes${qs}`) || [];
+  const statusBadge = s => s === 'pago' ? 'badge-green' : s === 'pendente' ? 'badge-amber' : 'badge-red';
+  document.getElementById('tb-despesas').innerHTML = rows.length
+    ? rows.map(r => `
+        <tr>
+          <td>${fmtDate(r.data)}</td>
+          <td>${r.descricao}</td>
+          <td><span class="badge badge-red">${r.categoria_nome || '—'}</span></td>
+          <td>${r.fornecedor_nome || '—'}</td>
+          <td class="money money-red">-${fmt(r.valor)}</td>
+          <td><span class="badge ${statusBadge(r.status)}">${r.status}</span></td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteTransacao(${r.id},'despesa')">✕</button></td>
+        </tr>`).join('')
+    : `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px;">Nenhuma despesa encontrada</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// FLUXO DE CAIXA
+// ═══════════════════════════════════════════════════════════
+async function loadFluxo() {
+  const days   = parseInt(document.getElementById('fluxo-period')?.value || 30);
+  const rows   = await api('GET', '/transacoes?status=pago') || [];
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const filtered = rows
+    .filter(r => new Date(r.data) >= cutoff)
+    .sort((a, b) => a.data.localeCompare(b.data));
+  let saldo = 0;
+  const extrato = filtered.map(r => {
+    saldo += r.tipo === 'receita' ? Number(r.valor) : -Number(r.valor);
+    return { ...r, saldo };
+  });
+  const totalRec  = extrato.filter(r => r.tipo === 'receita').reduce((a, r) => a + Number(r.valor), 0);
+  const totalDesp = extrato.filter(r => r.tipo === 'despesa').reduce((a, r) => a + Number(r.valor), 0);
+
+  document.getElementById('fluxo-stats').innerHTML = [
+    { label: 'Receitas no Período', value: fmt(totalRec),           c: 'money-green' },
+    { label: 'Despesas no Período', value: fmt(totalDesp),          c: 'money-red'   },
+    { label: 'Resultado',           value: fmt(totalRec - totalDesp), c: totalRec >= totalDesp ? 'money-green' : 'money-red' },
+    { label: 'Saldo Acumulado',     value: fmt(saldo),              c: '' },
+  ].map(s => `
+    <div class="stat-card">
+      <div class="stat-label">${s.label}</div>
+      <div class="stat-value ${s.c}" style="font-size:17px;">${s.value}</div>
+    </div>`).join('');
+
+  const byDate = {};
+  extrato.forEach(r => {
+    const d = r.data.substring(0, 10);
+    if (!byDate[d]) byDate[d] = { saldo: 0 };
+    byDate[d].saldo = r.saldo;
+  });
+  const chartLabels = Object.keys(byDate).sort();
+  const saldos = chartLabels.map(d => byDate[d].saldo);
+  const ctx = document.getElementById('chart-saldo').getContext('2d');
+  if (chartSaldo) chartSaldo.destroy();
+  chartSaldo = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: chartLabels.map(fmtDate),
+      datasets: [{
+        label: 'Saldo',
+        data: saldos,
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59,130,246,0.08)',
+        tension: 0.4,
+        fill: true,
+        pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8b90a0' } } },
+      scales: {
+        x: { ticks: { color: '#555a6e', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: {
+          ticks: { color: '#555a6e', callback: v => 'R$' + v.toLocaleString('pt-BR') },
+          grid:  { color: 'rgba(255,255,255,0.04)' }
+        }
+      }
+    }
+  });
+
+  document.getElementById('tb-fluxo').innerHTML =
+    [...extrato].reverse().map(r => `
+      <tr>
+        <td>${fmtDate(r.data)}</td>
+        <td>${r.descricao}</td>
+        <td><span class="badge ${r.tipo === 'receita' ? 'badge-green' : 'badge-red'}">${r.tipo}</span></td>
+        <td class="money ${r.tipo === 'receita' ? 'money-green' : 'money-red'}">
+          ${r.tipo === 'receita' ? '+' : '-'}${fmt(r.valor)}
+        </td>
+        <td class="money ${r.saldo >= 0 ? 'money-green' : 'money-red'}">${fmt(r.saldo)}</td>
+      </tr>`).join('')
+    || `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:32px;">Nenhuma transação no período</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// PRODUTOS
+// ═══════════════════════════════════════════════════════════
+async function loadProdutos() {
+  const s    = document.getElementById('search-produtos')?.value || '';
+  const rows = await api('GET', `/produtos?q=${encodeURIComponent(s)}`) || [];
+  const low  = rows.filter(r => Number(r.estoque_atual) <= Number(r.estoque_minimo));
+  const alertEl = document.getElementById('alert-estoque');
+  if (low.length > 0) {
+    alertEl.style.display = 'block';
+    alertEl.textContent   = `⚠ Atenção: ${low.length} produto(s) com estoque abaixo do mínimo: ${low.map(p => p.nome).join(', ')}`;
+  } else {
+    alertEl.style.display = 'none';
+  }
+
+  document.getElementById('tb-produtos').innerHTML = rows.length
+    ? rows.map(r => {
+        const margem = r.preco_venda > 0
+          ? ((r.preco_venda - r.custo) / r.preco_venda * 100).toFixed(1)
+          : 0;
+        const isLow = Number(r.estoque_atual) <= Number(r.estoque_minimo);
+        return `<tr>
+          <td><code style="font-size:11px;color:var(--text2);">${r.codigo}</code></td>
+          <td>
+            <div style="font-weight:500;">${r.nome}</div>
+            <div style="font-size:11px;color:var(--text3);">${r.descricao || ''}</div>
+          </td>
+          <td><span class="badge badge-purple">—</span></td>
+          <td class="${isLow ? 'stock-low' : 'stock-ok'}" style="font-weight:600;">
+            ${r.estoque_atual} ${r.unidade} ${isLow ? '⚠' : ''}
+          </td>
+          <td style="color:var(--text2);">${r.estoque_minimo}</td>
+          <td class="money">${fmt(r.custo)}</td>
+          <td class="money money-green">${fmt(r.preco_venda)}</td>
+          <td><span class="badge badge-amber">${margem}%</span></td>
+          <td style="display:flex;gap:6px;">
+            <button class="btn btn-ghost btn-sm" onclick="openModal('produto-edit',${r.id})">Editar</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteProduto(${r.id})">✕</button>
+          </td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:32px;">Nenhum produto encontrado</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MOVIMENTAÇÕES
+// ═══════════════════════════════════════════════════════════
+function filterMov(type, el) {
+  movFilterType = type;
+  document.querySelectorAll('#mov-filter .pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  loadMovimentos();
+}
+
+async function loadMovimentos() {
+  const qs   = movFilterType !== 'todos' ? `?tipo=${movFilterType}` : '';
+  const rows = await api('GET', `/movimentos${qs}`) || [];
+  const typeBadge = t => t === 'entrada' ? 'badge-green' : t === 'saida' ? 'badge-red' : 'badge-amber';
+  document.getElementById('tb-movimentos').innerHTML = rows.length
+    ? rows.map(r => {
+        const total = r.tipo === 'entrada' ? Number(r.quantidade) * Number(r.custo_unitario) : 0;
+        return `<tr>
+          <td style="font-size:12px;color:var(--text2);">${fmtDateTime(r.data_hora)}</td>
+          <td>
+            <div style="font-weight:500;">${r.produto_nome || r.produto_id}</div>
+            <div style="font-size:11px;color:var(--text3);">${r.produto_codigo || ''}</div>
+          </td>
+          <td><span class="badge ${typeBadge(r.tipo)}">${r.tipo}</span></td>
+          <td style="font-weight:600;color:${r.tipo === 'entrada' ? 'var(--green)' : 'var(--red)'};">
+            ${r.tipo === 'saida' ? '-' : '+'} ${r.quantidade}
+          </td>
+          <td class="money">${r.custo_unitario > 0 ? fmt(r.custo_unitario) : '—'}</td>
+          <td class="money">${total > 0 ? fmt(total) : '—'}</td>
+          <td style="color:var(--text2);">${r.usuario_nome || '—'}</td>
+          <td style="color:var(--text2);font-size:12px;">${r.observacao || '—'}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:32px;">Nenhuma movimentação</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// CLIENTES
+// ═══════════════════════════════════════════════════════════
+async function loadClientes() {
+  const s    = document.getElementById('search-clientes')?.value || '';
+  const rows = await api('GET', `/clientes?q=${encodeURIComponent(s)}`) || [];
+  document.getElementById('tb-clientes').innerHTML = rows.length
+    ? rows.map(r => `
+        <tr>
+          <td>
+            <div style="font-weight:500;">${r.nome}</div>
+            <div style="font-size:11px;color:var(--text3);">${r.cidade || ''} ${r.uf ? '- ' + r.uf : ''}</div>
+          </td>
+          <td style="font-family:monospace;font-size:12px;">${r.cpf_cnpj || '—'}</td>
+          <td style="color:var(--accent);">${r.email || '—'}</td>
+          <td>${r.telefone || '—'}</td>
+          <td>${r.cidade || '—'}</td>
+          <td class="money money-green">—</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteCliente(${r.id})">✕</button></td>
+        </tr>`).join('')
+    : `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px;">Nenhum cliente encontrado</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// FORNECEDORES
+// ═══════════════════════════════════════════════════════════
+async function loadFornecedores() {
+  const s    = document.getElementById('search-fornecedores')?.value || '';
+  const rows = await api('GET', `/fornecedores?q=${encodeURIComponent(s)}`) || [];
+  document.getElementById('tb-fornecedores').innerHTML = rows.length
+    ? rows.map(r => `
+        <tr>
+          <td><div style="font-weight:500;">${r.razao_social}</div></td>
+          <td style="font-family:monospace;font-size:12px;">${r.cnpj || '—'}</td>
+          <td>${r.contato || '—'}</td>
+          <td style="color:var(--accent);">${r.email || '—'}</td>
+          <td>${r.telefone || '—'}</td>
+          <td class="money money-red">—</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteFornecedor(${r.id})">✕</button></td>
+        </tr>`).join('')
+    : `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px;">Nenhum fornecedor</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// RELATÓRIOS
+// ═══════════════════════════════════════════════════════════
+async function loadRelatorios() {
+  const [dre, tops, audit, despCats, recCats] = await Promise.all([
+    api('GET', '/relatorios/dre'),
+    api('GET', '/relatorios/top-produtos'),
+    api('GET', '/relatorios/audit-log'),
+    api('GET', '/dashboard/categorias-despesas'),
+    api('GET', '/dashboard/categorias-receitas'),
+  ]);
+
+  document.getElementById('rel-dre').innerHTML = `
+    <div class="summary-row">
+      <span>Receita Bruta</span>
+      <span class="money money-green">${fmt(dre?.receita_bruta || 0)}</span>
+    </div>
+    <div class="summary-row">
+      <span>(-) Despesas Totais</span>
+      <span class="money money-red">(${fmt(dre?.despesas_totais || 0)})</span>
+    </div>
+    <div class="summary-total">
+      <span>Resultado Líquido</span>
+      <span class="money ${(dre?.resultado || 0) >= 0 ? 'money-green' : 'money-red'}">${fmt(dre?.resultado || 0)}</span>
+    </div>
+    <div class="summary-row" style="margin-top:12px;">
+      <span>Margem Líquida</span>
+      <span class="${(dre?.margem || 0) >= 0 ? 'money-green' : 'money-red'}">${dre?.margem || 0}%</span>
+    </div>`;
+
+  document.getElementById('rel-top-produtos').innerHTML = (tops || []).length
+    ? tops.map((p, i) => `
+        <div class="summary-row">
+          <div><span style="color:var(--text3);font-size:12px;">#${i + 1}</span> ${p.nome}</div>
+          <div>
+            <span class="badge badge-green">+${p.entradas || 0}</span>
+            <span class="badge badge-red">-${p.saidas || 0}</span>
+          </div>
+        </div>`).join('')
+    : '<div class="empty-state"><p>Sem dados de movimentação</p></div>';
+
+  const colors = [
+    '#ef4444','#f59e0b','#8b5cf6','#3b82f6',
+    '#10b981','#06b6d4','#ec4899','#84cc16'
+  ];
+
+  const ctx1 = document.getElementById('chart-desp-cat').getContext('2d');
+  if (chartDespCat) chartDespCat.destroy();
+  if ((despCats || []).length) {
+    chartDespCat = new Chart(ctx1, {
+      type: 'pie',
+      data: {
+        labels: despCats.map(c => c.categoria || 'Outras'),
+        datasets: [{ data: despCats.map(c => c.total), backgroundColor: colors, borderWidth: 0 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { color: '#8b90a0', font: { size: 11 }, boxWidth: 12 }
+          }
+        }
+      }
+    });
+  }
+
+  const ctx2 = document.getElementById('chart-rec-cat').getContext('2d');
+  if (chartRecCat) chartRecCat.destroy();
+  if ((recCats || []).length) {
+    chartRecCat = new Chart(ctx2, {
+      type: 'pie',
+      data: {
+        labels: recCats.map(c => c.categoria || 'Outras'),
+        datasets: [{ data: recCats.map(c => c.total), backgroundColor: colors, borderWidth: 0 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { color: '#8b90a0', font: { size: 11 }, boxWidth: 12 }
+          }
+        }
+      }
+    });
+  }
+
+  document.getElementById('tb-audit').innerHTML = (audit || []).map(a => `
+    <tr>
+      <td style="font-size:11px;color:var(--text2);">${fmtDateTime(a.data_hora)}</td>
+      <td><span class="badge badge-blue">${a.username || '—'}</span></td>
+      <td style="font-weight:500;">${a.acao}</td>
+      <td style="color:var(--text2);">${a.tabela || '—'}</td>
+      <td style="color:var(--text3);font-size:12px;">${a.detalhe || '—'}</td>
+    </tr>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// MODALS
+// ═══════════════════════════════════════════════════════════
+async function openModal(type, id = null) {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+
+  const [clientes, fornecedores, produtos, catsFin] = await Promise.all([
+    api('GET', '/clientes'),
+    api('GET', '/fornecedores'),
+    api('GET', '/produtos'),
+    api('GET', '/categorias-financeiro'),
+  ]);
+
+  const cliOpts     = (clientes    || []).map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+  const fornOpts    = (fornecedores|| []).map(f => `<option value="${f.id}">${f.razao_social}</option>`).join('');
+  const prodOpts    = (produtos    || []).map(p => `<option value="${p.id}" data-estoque="${p.estoque_atual}">[${p.codigo}] ${p.nome} — Estoque: ${p.estoque_atual} ${p.unidade}</option>`).join('');
+  const catRecOpts  = (catsFin     || []).filter(c => c.tipo === 'receita').map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+  const catDespOpts = (catsFin     || []).filter(c => c.tipo === 'despesa').map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+
+  const today = new Date().toISOString().split('T')[0];
+
+  if (type === 'receita') {
+    const prodOptsReceita = (produtos || []).map(p =>
+      `<option value="${p.id}" data-preco="${p.preco_venda}" data-nome="${p.nome}">[${p.codigo}] ${p.nome} — Estoque: ${p.estoque_atual} ${p.unidade}</option>`
+    ).join('');
+
+    content.innerHTML = `<h3>📈 Nova Receita</h3>
+      <div class="form-group"><label>Descrição*</label><input id="m-desc" placeholder="Descrição da receita"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor (R$)*</label><input id="m-valor" type="number" step="0.01" min="0.01" placeholder="0,00"/></div>
+        <div class="form-group"><label>Data*</label><input id="m-data" type="date" value="${today}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Categoria</label><select id="m-cat"><option value="">Selecione</option>${catRecOpts}</select></div>
+        <div class="form-group"><label>Status</label><select id="m-status"><option value="pago">Pago</option><option value="pendente">Pendente</option><option value="cancelado">Cancelado</option></select></div>
+      </div>
+      <div class="form-group">
+        <label>Produto (opcional)</label>
+        <select id="m-prod-receita" onchange="onProdutoReceitaChange(this)">
+          <option value="">Selecione um produto</option>${prodOptsReceita}
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">Ao selecionar, descrição e valor são preenchidos automaticamente.</div>
+      </div>
+      <div class="form-group"><label>Cliente</label><select id="m-cli"><option value="">Nenhum</option>${cliOpts}</select></div>
+      <div class="form-group"><label>Observação</label><textarea id="m-obs" placeholder="Observações..."></textarea></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-blue" onclick="saveReceita()">Salvar Receita</button>
+      </div>`;
+
+  } else if (type === 'despesa') {
+    content.innerHTML = `<h3>📉 Nova Despesa</h3>
+      <div class="form-group"><label>Descrição*</label><input id="m-desc" placeholder="Descrição da despesa"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor (R$)*</label><input id="m-valor" type="number" step="0.01" min="0.01" placeholder="0,00"/></div>
+        <div class="form-group"><label>Data*</label><input id="m-data" type="date" value="${today}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Categoria</label><select id="m-cat"><option value="">Selecione</option>${catDespOpts}</select></div>
+        <div class="form-group"><label>Status</label><select id="m-status"><option value="pago">Pago</option><option value="pendente">Pendente</option><option value="cancelado">Cancelado</option></select></div>
+      </div>
+      <div class="form-group"><label>Fornecedor</label><select id="m-forn"><option value="">Nenhum</option>${fornOpts}</select></div>
+      <div class="form-group"><label>Observação</label><textarea id="m-obs" placeholder="Observações..."></textarea></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-blue" onclick="saveDespesa()">Salvar Despesa</button>
+      </div>`;
+
+  } else if (type === 'produto' || type === 'produto-edit') {
+    let p = { codigo: '', nome: '', descricao: '', estoque_atual: 0, estoque_minimo: 0, custo: 0, preco_venda: 0, unidade: 'un' };
+    if (type === 'produto-edit' && id) {
+      const lista = await api('GET', '/produtos?q=') || [];
+      const found = lista.find(x => x.id === id);
+      if (found) p = found;
+    }
+    const isEdit = type === 'produto-edit';
+    content.innerHTML = `<h3>📦 ${isEdit ? 'Editar Produto' : 'Novo Produto'}</h3>
+      <div class="form-row">
+        <div class="form-group"><label>Código*</label><input id="m-codigo" value="${p.codigo}" placeholder="PRD001" ${isEdit ? 'readonly' : ''}></div>
+        <div class="form-group"><label>Unidade</label><select id="m-unidade">
+          ${['un','kg','lt','cx','mt','pc'].map(u => `<option ${p.unidade === u ? 'selected' : ''}>${u}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="form-group"><label>Nome*</label><input id="m-nome" value="${p.nome}" placeholder="Nome do produto"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Estoque Mínimo</label><input id="m-estoque-min" type="number" value="${p.estoque_minimo}" min="0"/></div>
+        <div class="form-group"><label>Estoque ${isEdit ? 'Atual (leia-só)' : 'Inicial'}</label><input id="m-estoque" type="number" value="${p.estoque_atual}" min="0" ${isEdit ? 'disabled' : ''}></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Custo (R$)</label><input id="m-custo" type="number" step="0.01" value="${p.custo}" min="0"/></div>
+        <div class="form-group"><label>Preço Venda (R$)</label><input id="m-preco" type="number" step="0.01" value="${p.preco_venda}" min="0"/></div>
+      </div>
+      <div class="form-group"><label>Descrição</label><textarea id="m-desc" placeholder="Detalhes do produto...">${p.descricao || ''}</textarea></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-blue" onclick="saveProduto(${isEdit ? id : null})">${isEdit ? 'Salvar Alterações' : 'Cadastrar Produto'}</button>
+      </div>`;
+
+  } else if (type === 'entrada' || type === 'saida') {
+    const isEntrada = type === 'entrada';
+    content.innerHTML = `<h3>${isEntrada ? '📥 Entrada' : '📤 Saída'} de Estoque</h3>
+      <div class="form-group"><label>Produto*</label><select id="m-prod" onchange="updateMaxQty(this)">
+        <option value="">Selecione um produto</option>${prodOpts}
+      </select></div>
+      <div class="form-row">
+        <div class="form-group"><label>Quantidade*</label><input id="m-qty" type="number" min="0.01" step="0.01" placeholder="0" oninput="calcTotal()"/></div>
+        <div class="form-group"><label>${isEntrada ? 'Custo Unitário (R$)' : 'Preço Unitário (R$)'}</label><input id="m-custo-unit" type="number" step="0.01" min="0" placeholder="0,00" oninput="calcTotal()"/></div>
+      </div>
+      ${!isEntrada ? `<div id="qty-warning" class="alert alert-warning" style="display:none;">⚠ Quantidade maior que o estoque disponível!</div>` : ''}
+      <div class="form-group"><label>Total Estimado</label><div id="m-total" style="font-family:monospace;font-size:16px;color:var(--green);padding:8px 0;">R$ 0,00</div></div>
+      <div class="form-group"><label>Observação</label><textarea id="m-obs" placeholder="${isEntrada ? 'Nota fiscal, fornecedor...' : 'Motivo da saída...'}"></textarea></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn ${isEntrada ? 'btn-success' : 'btn-danger'}" onclick="saveMovimento('${type}')">Registrar ${isEntrada ? 'Entrada' : 'Saída'}</button>
+      </div>`;
+
+  } else if (type === 'cliente') {
+    content.innerHTML = `<h3>👤 Novo Cliente</h3>
+      <div class="form-group"><label>Nome*</label><input id="m-nome" placeholder="Nome completo ou Razão Social"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>CPF/CNPJ</label><input id="m-cpf" placeholder="000.000.000-00"/></div>
+        <div class="form-group"><label>Telefone</label><input id="m-tel" placeholder="(11) 99999-9999"/></div>
+      </div>
+      <div class="form-group"><label>Email</label><input id="m-email" type="email" placeholder="email@exemplo.com"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Cidade</label><input id="m-cidade" placeholder="Cidade"/></div>
+        <div class="form-group"><label>UF</label><input id="m-uf" placeholder="SP" maxlength="2"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Endereço</label><input id="m-end" placeholder="Rua, número"/></div>
+        <div class="form-group"><label>CEP</label><input id="m-cep" placeholder="00000-000"/></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-blue" onclick="saveCliente()">Cadastrar Cliente</button>
+      </div>`;
+
+  } else if (type === 'fornecedor') {
+    content.innerHTML = `<h3>🚛 Novo Fornecedor</h3>
+      <div class="form-group"><label>Razão Social*</label><input id="m-nome" placeholder="Nome da empresa"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>CNPJ</label><input id="m-cnpj" placeholder="00.000.000/0001-00"/></div>
+        <div class="form-group"><label>Contato</label><input id="m-contato" placeholder="Nome do responsável"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Email</label><input id="m-email" type="email" placeholder="email@empresa.com"/></div>
+        <div class="form-group"><label>Telefone</label><input id="m-tel" placeholder="(11) 4444-5555"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Cidade</label><input id="m-cidade" placeholder="Cidade"/></div>
+        <div class="form-group"><label>UF</label><input id="m-uf" placeholder="SP" maxlength="2"/></div>
+      </div>
+      <div class="form-group"><label>Endereço</label><input id="m-end" placeholder="Endereço completo"/></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-blue" onclick="saveFornecedor()">Cadastrar Fornecedor</button>
+      </div>`;
+  }
+
+  overlay.classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+// Preenche descrição e valor automaticamente ao escolher um produto na receita
+function onProdutoReceitaChange(sel) {
+  if (!sel.value) return;
+  const opt   = sel.options[sel.selectedIndex];
+  const preco = parseFloat(opt.dataset.preco || 0);
+  const nome  = opt.dataset.nome || '';
+  const descEl  = document.getElementById('m-desc');
+  const valorEl = document.getElementById('m-valor');
+  if (descEl && !descEl.value) descEl.value = 'Venda — ' + nome;
+  if (valorEl && preco > 0)    valorEl.value = preco.toFixed(2);
+}
+
+function calcTotal() {
+  const q = parseFloat(document.getElementById('m-qty')?.value || 0);
+  const c = parseFloat(document.getElementById('m-custo-unit')?.value || 0);
+  const t = document.getElementById('m-total');
+  if (t) t.textContent = fmt(q * c);
+}
+
+function updateMaxQty(sel) {
+  const warn    = document.getElementById('qty-warning');
+  if (!warn) return;
+  const estoque = parseFloat(sel.options[sel.selectedIndex]?.dataset.estoque || 0);
+  const qty     = parseFloat(document.getElementById('m-qty')?.value || 0);
+  warn.style.display = qty > estoque ? 'block' : 'none';
+}
+
+// ═══════════════════════════════════════════════════════════
+// SAVES
+// ═══════════════════════════════════════════════════════════
+async function saveReceita() {
+  const desc   = document.getElementById('m-desc').value.trim();
+  const valor  = parseFloat(document.getElementById('m-valor').value);
+  const data   = document.getElementById('m-data').value;
+  const cat    = document.getElementById('m-cat').value || null;
+  const status = document.getElementById('m-status').value;
+  const cli    = document.getElementById('m-cli').value || null;
+  const obs    = document.getElementById('m-obs').value;
+  if (!desc || !valor || !data) { toast('Preencha os campos obrigatórios.', 'error'); return; }
+  try {
+    await api('POST', '/transacoes', {
+      tipo: 'receita', descricao: desc, categoria_id: cat ? Number(cat) : null,
+      valor, data, cliente_id: cli ? Number(cli) : null, status, observacao: obs
+    });
+    closeModal(); loadReceitas(); refreshDashboard();
+    toast('Receita registrada com sucesso!');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveDespesa() {
+  const desc   = document.getElementById('m-desc').value.trim();
+  const valor  = parseFloat(document.getElementById('m-valor').value);
+  const data   = document.getElementById('m-data').value;
+  const cat    = document.getElementById('m-cat').value || null;
+  const status = document.getElementById('m-status').value;
+  const forn   = document.getElementById('m-forn').value || null;
+  const obs    = document.getElementById('m-obs').value;
+  if (!desc || !valor || !data) { toast('Preencha os campos obrigatórios.', 'error'); return; }
+  try {
+    await api('POST', '/transacoes', {
+      tipo: 'despesa', descricao: desc, categoria_id: cat ? Number(cat) : null,
+      valor, data, fornecedor_id: forn ? Number(forn) : null, status, observacao: obs
+    });
+    closeModal(); loadDespesas(); refreshDashboard();
+    toast('Despesa registrada com sucesso!');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveProduto(id) {
+  const codigo     = document.getElementById('m-codigo').value.trim();
+  const nome       = document.getElementById('m-nome').value.trim();
+  const desc       = document.getElementById('m-desc').value.trim();
+  const estoque    = parseFloat(document.getElementById('m-estoque')?.value || 0);
+  const estoqueMin = parseFloat(document.getElementById('m-estoque-min').value || 0);
+  const custo      = parseFloat(document.getElementById('m-custo').value || 0);
+  const preco      = parseFloat(document.getElementById('m-preco').value || 0);
+  const unidade    = document.getElementById('m-unidade').value;
+  if (!codigo || !nome) { toast('Código e nome são obrigatórios.', 'error'); return; }
+  try {
+    if (id) {
+      await api('PUT', `/produtos/${id}`, {
+        codigo, nome, descricao: desc, estoque_atual: estoque,
+        estoque_minimo: estoqueMin, custo, preco_venda: preco, unidade
+      });
+      toast('Produto atualizado!');
+    } else {
+      await api('POST', '/produtos', {
+        codigo, nome, descricao: desc, estoque_atual: estoque,
+        estoque_minimo: estoqueMin, custo, preco_venda: preco, unidade
+      });
+      toast('Produto cadastrado!');
+    }
+    closeModal(); loadProdutos();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveMovimento(tipo) {
+  const pid   = parseInt(document.getElementById('m-prod').value);
+  const qty   = parseFloat(document.getElementById('m-qty').value);
+  const custo = parseFloat(document.getElementById('m-custo-unit').value || 0);
+  const obs   = document.getElementById('m-obs').value;
+  if (!pid || !qty || qty <= 0) { toast('Selecione produto e quantidade válida.', 'error'); return; }
+  try {
+    await api('POST', '/movimentos', {
+      produto_id: pid, tipo, quantidade: qty, custo_unitario: custo, observacao: obs
+    });
+    closeModal(); loadMovimentos(); loadProdutos();
+    toast(`${tipo === 'entrada' ? 'Entrada' : 'Saída'} registrada!`);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveCliente() {
+  const nome = document.getElementById('m-nome').value.trim();
+  if (!nome) { toast('Nome é obrigatório.', 'error'); return; }
+  try {
+    await api('POST', '/clientes', {
+      nome,
+      cpf_cnpj: document.getElementById('m-cpf').value,
+      telefone: document.getElementById('m-tel').value,
+      email:    document.getElementById('m-email').value,
+      endereco: document.getElementById('m-end').value,
+      cidade:   document.getElementById('m-cidade').value,
+      uf:       document.getElementById('m-uf').value,
+      cep:      document.getElementById('m-cep').value,
+    });
+    closeModal(); loadClientes();
+    toast('Cliente cadastrado!');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveFornecedor() {
+  const nome = document.getElementById('m-nome').value.trim();
+  if (!nome) { toast('Razão social é obrigatória.', 'error'); return; }
+  try {
+    await api('POST', '/fornecedores', {
+      razao_social: nome,
+      cnpj:     document.getElementById('m-cnpj').value,
+      contato:  document.getElementById('m-contato').value,
+      email:    document.getElementById('m-email').value,
+      telefone: document.getElementById('m-tel').value,
+      endereco: document.getElementById('m-end').value,
+      cidade:   document.getElementById('m-cidade').value,
+      uf:       document.getElementById('m-uf').value,
+    });
+    closeModal(); loadFornecedores();
+    toast('Fornecedor cadastrado!');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DELETES
+// ═══════════════════════════════════════════════════════════
+async function deleteTransacao(id, tipo) {
+  if (!confirm(`Excluir esta ${tipo}? Esta ação não pode ser desfeita.`)) return;
+  try {
+    await api('DELETE', `/transacoes/${id}`);
+    if (tipo === 'receita') loadReceitas(); else loadDespesas();
+    refreshDashboard();
+    toast(`${tipo} excluída.`);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteProduto(id) {
+  if (currentUser.role !== 'admin') {
+    toast('Apenas administradores podem excluir produtos.', 'error');
+    return;
+  }
+  if (!confirm('Excluir produto? Movimentações serão preservadas.')) return;
+  try {
+    await api('DELETE', `/produtos/${id}`);
+    loadProdutos();
+    toast('Produto removido.');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteCliente(id) {
+  if (!confirm('Remover cliente?')) return;
+  try {
+    await api('DELETE', `/clientes/${id}`);
+    loadClientes();
+    toast('Cliente removido.');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteFornecedor(id) {
+  if (!confirm('Remover fornecedor?')) return;
+  try {
+    await api('DELETE', `/fornecedores/${id}`);
+    loadFornecedores();
+    toast('Fornecedor removido.');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// BACKUP — Exporta todos os dados da empresa para .xlsx
+// ═══════════════════════════════════════════════════════════
+async function doBackup() {
+  toast('Gerando backup, aguarde...', 'success');
+  try {
+    const [transacoes, produtos, movimentos, clientes, fornecedores, categorias, audit] = await Promise.all([
+      api('GET', '/transacoes'),
+      api('GET', '/produtos'),
+      api('GET', '/movimentos'),
+      api('GET', '/clientes'),
+      api('GET', '/fornecedores'),
+      api('GET', '/categorias-financeiro'),
+      api('GET', '/relatorios/audit-log'),
+    ]);
+
+    const wb = XLSX.utils.book_new();
+
+    // ── Aba: Transações ──────────────────────────────────
+    const transRows = (transacoes || []).map(r => ({
+      'ID':           r.id,
+      'Tipo':         r.tipo,
+      'Descrição':    r.descricao,
+      'Valor (R$)':   Number(r.valor),
+      'Data':         r.data ? String(r.data).substring(0, 10) : '',
+      'Status':       r.status,
+      'Categoria':    r.categoria_nome  || '',
+      'Cliente':      r.cliente_nome    || '',
+      'Fornecedor':   r.fornecedor_nome || '',
+      'Observação':   r.observacao      || '',
+      'Criado em':    r.criado_em       || '',
+    }));
+    const wsTransacoes = XLSX.utils.json_to_sheet(transRows.length ? transRows : [{ 'Sem dados': '' }]);
+    XLSX.utils.book_append_sheet(wb, wsTransacoes, 'Transações');
+
+    // ── Aba: Produtos ────────────────────────────────────
+    const prodRows = (produtos || []).map(r => ({
+      'ID':               r.id,
+      'Código':           r.codigo,
+      'Nome':             r.nome,
+      'Descrição':        r.descricao       || '',
+      'Estoque Atual':    Number(r.estoque_atual),
+      'Estoque Mínimo':   Number(r.estoque_minimo),
+      'Custo (R$)':       Number(r.custo),
+      'Preço Venda (R$)': Number(r.preco_venda),
+      'Unidade':          r.unidade,
+      'Ativo':            r.ativo ? 'Sim' : 'Não',
+      'Criado em':        r.criado_em || '',
+    }));
+    const wsProdutos = XLSX.utils.json_to_sheet(prodRows.length ? prodRows : [{ 'Sem dados': '' }]);
+    XLSX.utils.book_append_sheet(wb, wsProdutos, 'Produtos');
+
+    // ── Aba: Movimentações de Estoque ────────────────────
+    const movRows = (movimentos || []).map(r => ({
+      'ID':               r.id,
+      'Data/Hora':        r.data_hora      || '',
+      'Produto':          r.produto_nome   || '',
+      'Código Produto':   r.produto_codigo || '',
+      'Tipo':             r.tipo,
+      'Quantidade':       Number(r.quantidade),
+      'Custo Unit. (R$)': Number(r.custo_unitario),
+      'Total (R$)':       r.tipo === 'entrada' ? Number(r.quantidade) * Number(r.custo_unitario) : 0,
+      'Usuário':          r.usuario_nome || '',
+      'Observação':       r.observacao   || '',
+    }));
+    const wsMovimentos = XLSX.utils.json_to_sheet(movRows.length ? movRows : [{ 'Sem dados': '' }]);
+    XLSX.utils.book_append_sheet(wb, wsMovimentos, 'Movimentações Estoque');
+
+    // ── Aba: Clientes ────────────────────────────────────
+    const cliRows = (clientes || []).map(r => ({
+      'ID':        r.id,
+      'Nome':      r.nome,
+      'CPF/CNPJ':  r.cpf_cnpj  || '',
+      'Telefone':  r.telefone  || '',
+      'Email':     r.email     || '',
+      'Endereço':  r.endereco  || '',
+      'Cidade':    r.cidade    || '',
+      'UF':        r.uf        || '',
+      'CEP':       r.cep       || '',
+      'Criado em': r.criado_em || '',
+    }));
+    const wsClientes = XLSX.utils.json_to_sheet(cliRows.length ? cliRows : [{ 'Sem dados': '' }]);
+    XLSX.utils.book_append_sheet(wb, wsClientes, 'Clientes');
+
+    // ── Aba: Fornecedores ────────────────────────────────
+    const fornRows = (fornecedores || []).map(r => ({
+      'ID':           r.id,
+      'Razão Social': r.razao_social,
+      'CNPJ':         r.cnpj      || '',
+      'Contato':      r.contato   || '',
+      'Email':        r.email     || '',
+      'Telefone':     r.telefone  || '',
+      'Endereço':     r.endereco  || '',
+      'Cidade':       r.cidade    || '',
+      'UF':           r.uf        || '',
+      'Criado em':    r.criado_em || '',
+    }));
+    const wsFornecedores = XLSX.utils.json_to_sheet(fornRows.length ? fornRows : [{ 'Sem dados': '' }]);
+    XLSX.utils.book_append_sheet(wb, wsFornecedores, 'Fornecedores');
+
+    // ── Aba: Categorias ──────────────────────────────────
+    const catRows = (categorias || []).map(r => ({
+      'ID':   r.id,
+      'Nome': r.nome,
+      'Tipo': r.tipo,
+    }));
+    const wsCategorias = XLSX.utils.json_to_sheet(catRows.length ? catRows : [{ 'Sem dados': '' }]);
+    XLSX.utils.book_append_sheet(wb, wsCategorias, 'Categorias');
+
+    // ── Aba: Log de Auditoria ────────────────────────────
+    const auditRows = (audit || []).map(r => ({
+      'ID':        r.id,
+      'Data/Hora': r.data_hora || '',
+      'Usuário':   r.username  || '',
+      'Ação':      r.acao,
+      'Tabela':    r.tabela    || '',
+      'Detalhe':   r.detalhe   || '',
+    }));
+    const wsAudit = XLSX.utils.json_to_sheet(auditRows.length ? auditRows : [{ 'Sem dados': '' }]);
+    XLSX.utils.book_append_sheet(wb, wsAudit, 'Log Auditoria');
+
+    // ── Gera e faz download do arquivo ──────────────────
+    const slug     = currentUser.slug || 'empresa';
+    const dataHoje = new Date().toISOString().split('T')[0];
+    const fileName = `backup_${slug}_${dataHoje}.xlsx`;
+
+    XLSX.writeFile(wb, fileName);
+    toast(`Backup gerado: ${fileName}`, 'success');
+
+  } catch (e) {
+    console.error(e);
+    toast('Erro ao gerar backup: ' + e.message, 'error');
+  }
+}

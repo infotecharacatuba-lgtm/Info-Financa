@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<!--
+  FinControl Pro — Sistema de Gestão Empresarial
+  Copyright © 2024 INFO TECH ARAÇATUBA. Todos os direitos reservados.
+  Desenvolvido por INFO TECH ARAÇATUBA
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="FinControl Pro — Sistema de Gestão Empresarial desenvolvido por INFO TECH ARAÇATUBA">
+  <meta name="author" content="INFO TECH ARAÇATUBA">
+  <title>FinControl Pro — INFO TECH ARAÇATUBA</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- MOBILE NAV -->
+<button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Menu">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+    <line x1="3" y1="6" x2="21" y2="6"/>
+    <line x1="3" y1="12" x2="21" y2="12"/>
+    <line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- AUTH -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <h1>FinControl Pro</h1>
+      <p>Sistema de Gestão Empresarial</p>
+      <p class="auth-copyright">© 2024 INFO TECH ARAÇATUBA</p>
+    </div>
+    <div style="text-align:center; margin-bottom:24px;">
+      <span class="auth-badge">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <circle cx="5" cy="5" r="4" fill="currentColor"/>
+        </svg>
+        Ambiente Seguro — SQL Criptografado
+      </span>
+    </div>
+    <div class="auth-error" id="auth-error"></div>
+    <div class="form-group">
+      <label>Usuário</label>
+      <input type="text" id="login-user" placeholder="admin" autocomplete="username"/>
+    </div>
+    <div class="form-group">
+      <label>Senha</label>
+      <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/>
+    </div>
+    <div id="login-slug-box" style="display:none;" class="form-group">
+      <label>Identificador da Empresa (slug)</label>
+      <input type="text" id="login-slug" placeholder="ex: minha-empresa" autocomplete="off"/>
+    </div>
+    <button class="btn-primary" onclick="doLogin()">Entrar no Sistema</button>
+    <p class="auth-hint">Use as credenciais fornecidas pelo administrador</p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h2>FinControl</h2>
+      <span>Sistema Empresarial</span>
+    </div>
+
+    <div class="sidebar-nav">
+
+      <!-- Super Admin (visível apenas para superadmin) -->
+      <div class="nav-section" id="nav-section-superadmin" style="display:none;">Sistema</div>
+      <div class="nav-item" id="nav-superadmin" style="display:none;" onclick="navigate('superadmin')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        Empresas / Clientes
+      </div>
+
+      <div class="nav-section">Principal</div>
+      <div class="nav-item active" onclick="navigate('dashboard')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" rx="1"/>
+          <rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/>
+          <rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        Dashboard
+      </div>
+
+      <div class="nav-section">Financeiro</div>
+      <div class="nav-item" onclick="navigate('receitas')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+          <polyline points="17 6 23 6 23 12"/>
+        </svg>
+        Receitas
+      </div>
+      <div class="nav-item" onclick="navigate('despesas')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+          <polyline points="17 18 23 18 23 12"/>
+        </svg>
+        Despesas
+      </div>
+      <div class="nav-item" onclick="navigate('fluxo')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="1" x2="12" y2="23"/>
+          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+        </svg>
+        Fluxo de Caixa
+      </div>
+
+      <div class="nav-section">Estoque</div>
+      <div class="nav-item" onclick="navigate('produtos')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+          <line x1="12" y1="22.08" x2="12" y2="12"/>
+        </svg>
+        Produtos
+      </div>
+      <div class="nav-item" onclick="navigate('movimentos')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12h14"/>
+          <path d="M12 5l7 7-7 7"/>
+        </svg>
+        Movimentações
+      </div>
+
+      <div class="nav-section">Gestão</div>
+      <div class="nav-item" onclick="navigate('clientes')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        Clientes
+      </div>
+      <div class="nav-item" onclick="navigate('fornecedores')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="1" y="3" width="15" height="13" rx="2"/>
+          <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
+          <circle cx="5.5" cy="18.5" r="2.5"/>
+          <circle cx="18.5" cy="18.5" r="2.5"/>
+        </svg>
+        Fornecedores
+      </div>
+      <div class="nav-item" onclick="navigate('relatorios')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        Relatórios
+      </div>
+
+    </div><!-- /sidebar-nav -->
+
+    <div class="sidebar-footer">
+      <!-- BACKUP — visível apenas para usuários de empresa (não superadmin) -->
+      <div id="backup-btn-wrap" style="padding:0 10px 10px;">
+        <button class="btn btn-ghost" style="width:100%;justify-content:center;gap:8px;" onclick="doBackup()" title="Exportar todos os dados para Excel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Backup (.xlsx)
+        </button>
+      </div>
+      <div class="sidebar-brand">
+        © 2024 INFO TECH ARAÇATUBA<br>Todos os direitos reservados
+      </div>
+      <div class="user-badge">
+        <div class="user-avatar" id="user-avatar">AD</div>
+        <div class="user-info">
+          <div class="user-name" id="user-name-display">Admin</div>
+          <div class="user-role" id="user-role-display">Administrador</div>
+        </div>
+        <button class="btn-logout" onclick="doLogout()" title="Sair">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
+      </div>
+    </div><!-- /sidebar-footer -->
+
+  </nav><!-- /sidebar -->
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- ── SUPERADMIN ───────────────────────────────────── -->
+    <div class="page" id="page-superadmin">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>🏢 Gestão de Empresas</h2>
+          <p>Cadastre e gerencie os clientes do sistema</p>
+        </div>
+        <button class="btn btn-blue" onclick="openSANovaEmpresa()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Nova Empresa
+        </button>
+      </div>
+      <div class="alert alert-warning" style="margin-bottom:16px;">
+        <strong>⚡ Super Admin</strong> — Você tem acesso total ao sistema. Cada empresa tem banco de dados isolado.
+      </div>
+      <div class="card" style="padding:0;">
+        <div id="sa-empresas">
+          <div class="empty-state"><p>Carregando empresas...</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DASHBOARD ────────────────────────────────────── -->
+    <div class="page" id="page-dashboard">
+      <div class="page-header">
+        <div class="page-title">
+          <h2 id="dash-title">Dashboard</h2>
+          <p>Visão geral do negócio — <span id="today-date"></span></p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="refreshDashboard()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          Atualizar
+        </button>
+      </div>
+
+      <!-- Banner de boas-vindas com nome do cliente cadastrado -->
+      <div class="dash-welcome" id="dash-welcome-banner">
+        <div class="dash-welcome-text">
+          <h3 id="dash-welcome-title">Bem-vindo ao FinControl Pro</h3>
+          <p id="dash-welcome-subtitle">Gerencie suas finanças e estoque com facilidade</p>
+        </div>
+        <div class="dash-welcome-badge">
+          FinControl Pro<br>© INFO TECH ARAÇATUBA
+        </div>
+      </div>
+
+      <div class="stat-grid" id="dash-stats"></div>
+      <div class="charts-grid">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Fluxo Mensal</div>
+              <div class="card-subtitle">Receitas vs Despesas (últimos 6 meses)</div>
+            </div>
+          </div>
+          <div class="chart-container"><canvas id="chart-fluxo"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Categorias</div>
+              <div class="card-subtitle">Distribuição de despesas</div>
+            </div>
+          </div>
+          <div class="chart-container"><canvas id="chart-cat"></canvas></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Últimas Transações</div>
+            <button class="btn btn-ghost btn-sm" onclick="navigate('receitas')">Ver todas</button>
+          </div>
+          <div id="dash-transactions"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Estoque Crítico</div>
+            <span class="badge badge-red" id="dash-low-count">0</span>
+          </div>
+          <div id="dash-lowstock"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RECEITAS ──────────────────────────────────────── -->
+    <div class="page" id="page-receitas">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Receitas</h2>
+          <p>Controle de entradas financeiras</p>
+        </div>
+        <button class="btn btn-blue" onclick="openModal('receita')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Nova Receita
+        </button>
+      </div>
+      <div class="search-bar">
+        <input class="search-input" type="text" placeholder="Buscar receitas..." id="search-receitas" oninput="loadReceitas()">
+        <select id="filter-receitas-cat" class="search-input" style="max-width:180px;" onchange="loadReceitas()">
+          <option value="">Todas as categorias</option>
+          <option>Vendas</option>
+          <option>Serviços</option>
+          <option>Investimentos</option>
+          <option>Outras</option>
+        </select>
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th><th>Descrição</th><th>Categoria</th>
+                <th>Cliente</th><th>Valor</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tb-receitas"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DESPESAS ──────────────────────────────────────── -->
+    <div class="page" id="page-despesas">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Despesas</h2>
+          <p>Controle de saídas financeiras</p>
+        </div>
+        <button class="btn btn-blue" onclick="openModal('despesa')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Nova Despesa
+        </button>
+      </div>
+      <div class="search-bar">
+        <input class="search-input" type="text" placeholder="Buscar despesas..." id="search-despesas" oninput="loadDespesas()">
+        <select id="filter-despesas-cat" class="search-input" style="max-width:180px;" onchange="loadDespesas()">
+          <option value="">Todas as categorias</option>
+          <option>Fornecedores</option>
+          <option>Folha de Pagamento</option>
+          <option>Aluguel</option>
+          <option>Utilities</option>
+          <option>Marketing</option>
+          <option>Outras</option>
+        </select>
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th><th>Descrição</th><th>Categoria</th>
+                <th>Fornecedor</th><th>Valor</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tb-despesas"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FLUXO DE CAIXA ────────────────────────────────── -->
+    <div class="page" id="page-fluxo">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Fluxo de Caixa</h2>
+          <p>Posição financeira consolidada</p>
+        </div>
+        <select id="fluxo-period" class="btn btn-ghost btn-sm" onchange="loadFluxo()" style="cursor:pointer;">
+          <option value="7">Últimos 7 dias</option>
+          <option value="30" selected>Últimos 30 dias</option>
+          <option value="90">Últimos 90 dias</option>
+        </select>
+      </div>
+      <div class="stat-grid" id="fluxo-stats"></div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Evolução do Saldo</div>
+        </div>
+        <div class="chart-container" style="height:280px;">
+          <canvas id="chart-saldo"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Extrato Detalhado</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th><th>Descrição</th><th>Tipo</th>
+                <th>Valor</th><th>Saldo Acumulado</th>
+              </tr>
+            </thead>
+            <tbody id="tb-fluxo"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PRODUTOS ──────────────────────────────────────── -->
+    <div class="page" id="page-produtos">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Produtos &amp; Estoque</h2>
+          <p>Gestão de inventário</p>
+        </div>
+        <button class="btn btn-blue" onclick="openModal('produto')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Novo Produto
+        </button>
+      </div>
+      <div id="alert-estoque" class="alert alert-warning" style="display:none;"></div>
+      <div class="search-bar">
+        <input class="search-input" type="text" placeholder="Buscar produto, código, categoria..." id="search-produtos" oninput="loadProdutos()">
+        <select id="filter-produtos-cat" class="search-input" style="max-width:160px;" onchange="loadProdutos()">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Código</th><th>Produto</th><th>Categoria</th><th>Estoque</th>
+                <th>Mín.</th><th>Custo</th><th>Preço Venda</th><th>Margem</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tb-produtos"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MOVIMENTAÇÕES ─────────────────────────────────── -->
+    <div class="page" id="page-movimentos">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Movimentações de Estoque</h2>
+          <p>Entradas e saídas de produtos</p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-success" onclick="openModal('entrada')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+            </svg>
+            Entrada
+          </button>
+          <button class="btn btn-danger" onclick="openModal('saida')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+            </svg>
+            Saída
+          </button>
+        </div>
+      </div>
+      <div class="filter-pills" id="mov-filter">
+        <div class="pill active" onclick="filterMov('todos',this)">Todos</div>
+        <div class="pill" onclick="filterMov('entrada',this)">Entradas</div>
+        <div class="pill" onclick="filterMov('saida',this)">Saídas</div>
+        <div class="pill" onclick="filterMov('ajuste',this)">Ajustes</div>
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data/Hora</th><th>Produto</th><th>Tipo</th><th>Qtd</th>
+                <th>Custo Unit.</th><th>Total</th><th>Usuário</th><th>Observação</th>
+              </tr>
+            </thead>
+            <tbody id="tb-movimentos"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CLIENTES ──────────────────────────────────────── -->
+    <div class="page" id="page-clientes">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Clientes</h2>
+          <p>Cadastro de clientes</p>
+        </div>
+        <button class="btn btn-blue" onclick="openModal('cliente')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Novo Cliente
+        </button>
+      </div>
+      <div class="search-bar">
+        <input class="search-input" type="text" placeholder="Buscar por nome, CPF/CNPJ, telefone..." id="search-clientes" oninput="loadClientes()">
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th><th>CPF/CNPJ</th><th>Email</th>
+                <th>Telefone</th><th>Cidade</th><th>Total Compras</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tb-clientes"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FORNECEDORES ──────────────────────────────────── -->
+    <div class="page" id="page-fornecedores">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Fornecedores</h2>
+          <p>Cadastro de fornecedores</p>
+        </div>
+        <button class="btn btn-blue" onclick="openModal('fornecedor')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Novo Fornecedor
+        </button>
+      </div>
+      <div class="search-bar">
+        <input class="search-input" type="text" placeholder="Buscar fornecedor..." id="search-fornecedores" oninput="loadFornecedores()">
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Razão Social</th><th>CNPJ</th><th>Contato</th>
+                <th>Email</th><th>Telefone</th><th>Total Compras</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tb-fornecedores"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RELATÓRIOS ────────────────────────────────────── -->
+    <div class="page" id="page-relatorios">
+      <div class="page-header">
+        <div class="page-title">
+          <h2>Relatórios</h2>
+          <p>Análises e exportações</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px;">DRE Simplificado</div>
+          <div id="rel-dre"></div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px;">Top 5 Produtos — Movimentação</div>
+          <div id="rel-top-produtos"></div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px;">Resumo de Categorias de Despesas</div>
+          <div class="chart-container"><canvas id="chart-desp-cat"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px;">Resumo de Categorias de Receitas</div>
+          <div class="chart-container"><canvas id="chart-rec-cat"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Log de Auditoria</div>
+          <span class="badge badge-blue">Segurança</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data/Hora</th><th>Usuário</th><th>Ação</th><th>Tabela</th><th>Detalhe</th>
+              </tr>
+            </thead>
+            <tbody id="tb-audit"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main><!-- /main -->
+</div><!-- /app -->
+
+<!-- MODALS -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
